@@ -1,4 +1,4 @@
-"""Local read-only Bluetooth telemetry for Pion Power Trek 4200."""
+"""Local Bluetooth telemetry and output switches for Pion Power Trek 4200."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 
 from .coordinator import TrekCoordinator
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[TrekCoordinator]) -> bool:

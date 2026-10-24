@@ -1,4 +1,4 @@
-"""Output enable status, deliberately not switch entities."""
+"""Retain existing output-status entities and their history alongside switches."""
 
 from __future__ import annotations
 
