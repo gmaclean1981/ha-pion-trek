@@ -9,6 +9,6 @@
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/gmaclean1981/ha-pion-trek/issues",
-  "requirements": ["bleak-retry-connector==4.7.1"],
+  "requirements": ["bleak-retry-connector>=4.7.1"],
   "version": "0.1.1"
 }
