@@ -38,24 +38,31 @@ The request reads main register block 13000 (300 bytes), and six expansion summa
 | Offset | Format | Reading |
 |---|---|---|
 | 1–25 | ASCII, matching outer identifier | Serial number |
+| 28 / 32 | unsigned LE16 ÷10 | AC input V / Hz |
+| 42 / 46 | unsigned LE16 ÷10 | Inverter V / Hz |
 | 54 | unsigned LE16 ÷10 | Battery V |
 | 60 | signed LE16 | Battery °C |
 | 62 | unsigned LE16 | Battery % |
 | 64 | unsigned LE16 | Battery health %, device estimate |
+| 76 / 78 | unsigned LE16 ÷10 | Maximum / minimum battery-cell °C |
 | 80 | unsigned LE16 | AC output W |
 | 82 | unsigned LE16 ÷10 | USB-A W |
 | 84 | unsigned LE16 ÷10 | USB-C W |
+| 86 / 88 | unsigned LE16 ÷10 | 5521 DC barrel / RV output W |
 | 92 / 93 / 94 | byte, 0 or 1 | AC / DC / USB enabled |
 | 145–149 | Five unsigned bytes | Internal temperatures 1–5, °C |
 | 152–155 | Four decimal bytes, dot-separated | Reported software version; component not established |
 | 156–159 | Four decimal bytes, dot-separated | Hardware version |
 | 160–161 | Two **hexadecimal** bytes, dot-separated | DSP firmware |
+| 260 | unsigned LE16 ÷10 | Cigarette-lighter (car socket) output W |
 | 269–272 | Four decimal bytes, dot-separated | Communications firmware (app's DebugSoftVer / Mater_Com) |
 | 273–280 | NUL-padded ASCII | BMS firmware |
 
 App-style total output = offset 80 + (82 + 84 + 86 + 88 + 260)/10, each term read as unsigned LE16. Nonzero USB/DC readings remain to be validated in real operating modes. Charging, cell voltage and runtime fields are deliberately omitted.
 
 Metadata offsets and formatting were compared with the app parser and 25 captured telemetry responses from two sessions. All five temperature locations remain unidentified. Versions consisting entirely of zero or FF bytes, invalid/nonmatching serial text, invalid BMS text, battery health above 100, and temperature FF bytes are treated as unknown. Suppressing FF temperatures is a conservative validity rule, not a confirmed vendor sentinel definition. Zero degrees and zero-percent health remain representable. Metadata never changes entity identity or the permitted outgoing commands.
+
+In version 0.5.0, the nine additional AC/cell-temperature/DC values were compared directly with the extracted stock-app `handle_13000` decoder for all 25 captured responses (225 matching values). The cell temperatures use the app's unsigned LE16 tenths, unlike the signed whole-degree main battery temperature. The separate DC values were zero in these captures; synthetic nonzero values test scaling, separation and the unchanged output sum, but do not establish physical port accuracy. All-FF words are conservatively represented as unknown for the nine new sensors, without rejecting other valid readings; this is not a confirmed vendor sentinel. No new registers, polls or writes are added.
 
 ## Maximum battery charge
 

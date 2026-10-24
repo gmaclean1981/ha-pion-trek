@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-10-24
+
+- Adds nine read-only sensors: AC input/inverter voltage and frequency, maximum/minimum battery-cell temperature, and DC barrel/RV/car-socket power.
+- Uses the existing telemetry response, with six diagnostic entities and three power sensors. Existing entity keys and total-output calculation are unchanged.
+- Decoder matches the stock app across 25 captured responses (225 new field values). Nonzero DC loads remain unverified on hardware.
+- Document that this project was coded using Codex, an AI agent, with direction and live hardware testing by the project owner.
+
+Local trial on Home Assistant 2026.10.3 confirmed nine new live sensors and preservation of all twenty-eight existing entity identities. AC voltage/frequency and cell temperatures reported plausible values; DC ports reported zero while off. All 378 test cases pass across the full suite and targeted corrections, and Ruff checks pass. No device settings or outputs changed; nonzero physical DC loads remain untested.
+
+Update to v0.5.0 in HACS and restart Home Assistant. Keep the existing integration entry, including when upgrading from local 0.5.0b1; no re-pairing is needed. The six electrical/cell-temperature sensors appear under Diagnostic and the three DC power sensors under Sensors.
+
 ## 0.4.0 — 2026-10-24
 
 - Minimum discharge configuration number, with fresh maximum-charge checks and preservation of the observed 3% factory reserve.

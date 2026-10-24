@@ -94,6 +94,33 @@
       },
       "internal_temperature_5": {
         "name": "Internal temperature 5"
+      },
+      "ac_input_voltage": {
+        "name": "AC input voltage"
+      },
+      "ac_input_frequency": {
+        "name": "AC input frequency"
+      },
+      "inverter_voltage": {
+        "name": "Inverter voltage"
+      },
+      "inverter_frequency": {
+        "name": "Inverter frequency"
+      },
+      "battery_cell_temperature_max": {
+        "name": "Battery cell maximum temperature"
+      },
+      "battery_cell_temperature_min": {
+        "name": "Battery cell minimum temperature"
+      },
+      "dc_barrel_output_power": {
+        "name": "DC barrel output power"
+      },
+      "dc_rv_output_power": {
+        "name": "DC RV output power"
+      },
+      "dc_car_output_power": {
+        "name": "DC car socket output power"
       }
     },
     "switch": {
