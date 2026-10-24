@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfPower, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import TrekCoordinator
@@ -68,6 +69,41 @@ SENSORS = (
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
     ),
+    SensorEntityDescription(
+        key="battery_health",
+        translation_key="battery_health",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:battery-heart-variant",
+    ),
+    *(
+        SensorEntityDescription(
+            key=f"internal_temperature_{index}",
+            translation_key=f"internal_temperature_{index}",
+            device_class=SensorDeviceClass.TEMPERATURE,
+            native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+            state_class=SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        )
+        for index in range(1, 6)
+    ),
+    *(
+        SensorEntityDescription(
+            key=key,
+            translation_key=key,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            icon="mdi:information-outline",
+        )
+        for key in (
+            "serial_number",
+            "hardware_version",
+            "communications_firmware",
+            "dsp_firmware",
+            "bms_firmware",
+            "reported_software_version",
+        )
+    ),
 )
 
 
@@ -89,5 +125,5 @@ class TrekSensor(TrekEntity, SensorEntity):
         self.entity_description = description
 
     @property
-    def native_value(self) -> int | float:
+    def native_value(self) -> int | float | str | None:
         return getattr(self.coordinator.data, self.entity_description.key)

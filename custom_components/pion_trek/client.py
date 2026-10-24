@@ -5,16 +5,25 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
 from bleak import BleakBackend
 
+from .charge_protocol import (
+    ChargeControlProtocol,
+    ChargeSettings,
+    decode_settings,
+    validate_charge_ack,
+    validate_charge_limit,
+    validate_charge_tx,
+    validate_settings_query,
+)
 from .protocol import (
     CHARACTERISTIC_UUID,
     SERVICE_UUID,
     FrameAssembler,
-    OutputControlProtocol,
     Telemetry,
     decode_telemetry,
     fingerprint,
@@ -27,6 +36,7 @@ from .protocol import (
 SESSION_SETTLE_SECONDS = 1
 CONTROL_CONFIRM_SECONDS = 20
 CONTROL_POLL_SECONDS = 2
+SETTINGS_POLL_SECONDS = 60
 
 
 class TrekError(Exception):
@@ -49,6 +59,10 @@ class OutputNotConfirmed(TrekError):
     """A write was acknowledged, but its requested state was not confirmed."""
 
 
+class ChargeNotConfirmed(TrekError):
+    """The charge limit or unchanged surrounding settings could not be verified."""
+
+
 class TrekClient:
     """One persistent connection, serialized polling, clean reconnects."""
 
@@ -63,13 +77,16 @@ class TrekClient:
         self._expected_fingerprint = expected_fingerprint
         self._client: Any = None
         self._characteristic: Any = None
-        self._protocol = OutputControlProtocol()
+        self._protocol = ChargeControlProtocol()
+        self._settings: ChargeSettings | None = None
+        self._settings_read_at = 0.0
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=32)
         self._assembler = FrameAssembler()
         self._lock = asyncio.Lock()
         self._closed = False
         self.device_fingerprint: str | None = None
         self.poll_count = 0
+        self.settings_poll_count = 0
         self.connection_count = 0
         self.mtu: int | None = None
         self.backend: str | None = None
@@ -85,6 +102,7 @@ class TrekClient:
     async def _disconnect(self) -> None:
         client, self._client = self._client, None
         self._characteristic = None
+        self._settings = None
         if client is not None:
             with suppress(Exception):
                 async with asyncio.timeout(10):
@@ -106,6 +124,16 @@ class TrekClient:
         async with asyncio.timeout(12):
             await self._client.write_gatt_char(self._characteristic, frame, response=True)
 
+    async def _send_settings_query(self, frame: bytes) -> None:
+        validate_settings_query(frame)
+        async with asyncio.timeout(12):
+            await self._client.write_gatt_char(self._characteristic, frame, response=True)
+
+    async def _send_charge_limit(self, frame: bytes) -> None:
+        validate_charge_tx(frame)
+        async with asyncio.timeout(12):
+            await self._client.write_gatt_char(self._characteristic, frame, response=True)
+
     async def _receive(
         self, opcode: int, sequence: bytes, inner_sequence: bytes | None = None
     ) -> bytes:
@@ -122,7 +150,7 @@ class TrekClient:
         # Old notification callbacks retain their old queue/assembler.
         queue = self._queue = asyncio.Queue(maxsize=32)
         assembler = self._assembler = FrameAssembler()
-        self._protocol = OutputControlProtocol()
+        self._protocol = ChargeControlProtocol()
         self._client = await self._connect()
         self.connection_count += 1
         service = self._client.services.get_service(SERVICE_UUID)
@@ -174,6 +202,28 @@ class TrekClient:
         self.poll_count += 1
         return value
 
+    async def _read_settings_connected(self) -> ChargeSettings:
+        request = self._protocol.settings()
+        await self._send_settings_query(request)
+        reply = await self._receive(0x33, request[4:8], request[47:51])
+        settings = decode_settings(reply, self._protocol.identifier, request[4:8], request[47:51])
+        self._settings = settings
+        self._settings_read_at = asyncio.get_running_loop().time()
+        self.settings_poll_count += 1
+        return settings
+
+    async def _with_settings(self, value: Telemetry) -> Telemetry:
+        if (
+            self._settings is None
+            or asyncio.get_running_loop().time() - self._settings_read_at >= SETTINGS_POLL_SECONDS
+        ):
+            await self._read_settings_connected()
+        return replace(
+            value,
+            max_charge_limit=self._settings.max_charge_limit,
+            min_charge_limit=self._settings.min_charge_limit,
+        )
+
     async def async_poll(self) -> Telemetry:
         async with self._lock:
             if self._closed:
@@ -182,7 +232,7 @@ class TrekClient:
                 async with asyncio.timeout(70):
                     if not self.connected:
                         await self._open()
-                    return await self._read_connected()
+                    return await self._with_settings(await self._read_connected())
             except asyncio.CancelledError:
                 await self._disconnect()
                 raise
@@ -220,11 +270,68 @@ class TrekClient:
                             while True:
                                 value = await self._read_connected()
                                 if getattr(value, f"{output}_enabled") == enabled:
-                                    return value
+                                    return await self._with_settings(value)
                                 await asyncio.sleep(CONTROL_POLL_SECONDS)
                     except TimeoutError as err:
                         raise OutputNotConfirmed(
                             "Requested output state was not confirmed"
+                        ) from err
+            except asyncio.CancelledError:
+                await self._disconnect()
+                raise
+            except Exception:
+                await self._disconnect()
+                raise
+
+    async def async_set_charge_limit(self, limit: int) -> Telemetry:
+        """Write exactly one register once, then confirm it with fresh settings.
+
+        A fresh pre-read protects the minimum discharge limit and lets us detect
+        changes to other settings. Never replay a failed or ambiguous write.
+        """
+        validate_charge_limit(limit)
+        async with self._lock:
+            if self._closed:
+                raise TrekError("Client is closed")
+            try:
+                async with asyncio.timeout(90):
+                    if not self.connected:
+                        await self._open()
+                    before = await self._read_settings_connected()
+                    if limit <= before.min_charge_limit:
+                        raise TrekError("Maximum charge must exceed the minimum discharge limit")
+                    telemetry_before = await self._read_connected()
+                    if limit == before.max_charge_limit:
+                        return await self._with_settings(telemetry_before)
+                    request = self._protocol.set_charge_limit(limit)
+                    await self._send_charge_limit(request)
+                    reply = await self._receive(0x33, request[4:8], request[47:51])
+                    validate_charge_ack(
+                        reply, self._protocol.identifier, request[4:8], request[47:51], limit
+                    )
+                    try:
+                        async with asyncio.timeout(CONTROL_CONFIRM_SECONDS):
+                            while True:
+                                after = await self._read_settings_connected()
+                                if after.other_settings() != before.other_settings():
+                                    raise ChargeNotConfirmed(
+                                        "Other device settings changed during the command"
+                                    )
+                                if after.max_charge_limit == limit:
+                                    telemetry_after = await self._read_connected()
+                                    if any(
+                                        getattr(telemetry_before, key)
+                                        != getattr(telemetry_after, key)
+                                        for key in ("ac_enabled", "dc_enabled", "usb_enabled")
+                                    ):
+                                        raise ChargeNotConfirmed(
+                                            "Output states changed during the command"
+                                        )
+                                    return await self._with_settings(telemetry_after)
+                                await asyncio.sleep(CONTROL_POLL_SECONDS)
+                    except TimeoutError as err:
+                        raise ChargeNotConfirmed(
+                            "Maximum charge setting was not confirmed"
                         ) from err
             except asyncio.CancelledError:
                 await self._disconnect()

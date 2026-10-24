@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 SERVICE_UUID = "000000ff-0000-1000-8000-00805f9b34fb"
@@ -248,6 +248,38 @@ class Telemetry:
     ac_enabled: bool
     dc_enabled: bool
     usb_enabled: bool
+    serial_number: str | None = field(default=None, repr=False)
+    hardware_version: str | None = None
+    reported_software_version: str | None = None
+    communications_firmware: str | None = None
+    dsp_firmware: str | None = None
+    bms_firmware: str | None = None
+    battery_health: int | None = None
+    internal_temperature_1: int | None = None
+    internal_temperature_2: int | None = None
+    internal_temperature_3: int | None = None
+    internal_temperature_4: int | None = None
+    internal_temperature_5: int | None = None
+    # Filled by the client from its separate settings query, not block 13000.
+    max_charge_limit: int | None = None
+    min_charge_limit: int | None = None
+
+
+def _text(data: bytes) -> str | None:
+    """Accept printable ASCII with optional trailing NUL padding."""
+    data = data.rstrip(b"\0")
+    if not data or not any(byte != 32 for byte in data):
+        return None
+    if any(byte < 32 or byte > 126 for byte in data):
+        return None
+    return data.decode("ascii")
+
+
+def _version(data: bytes, *, hexadecimal: bool = False) -> str | None:
+    """Match the app's decimal versions and its distinct hexadecimal DSP version."""
+    if data in (bytes(len(data)), b"\xff" * len(data)):
+        return None
+    return ".".join(f"{byte:02x}" if hexadecimal else str(byte) for byte in data)
 
 
 def decode_telemetry(frame: bytes, identifier: bytes, inner_sequence: bytes) -> Telemetry:
@@ -296,4 +328,17 @@ def decode_telemetry(frame: bytes, identifier: bytes, inner_sequence: bytes) -> 
         ac_enabled=bool(data[92]),
         dc_enabled=bool(data[93]),
         usb_enabled=bool(data[94]),
+        serial_number=_text(data[1:26]) if data[1:26] == identifier else None,
+        hardware_version=_version(data[156:160]),
+        reported_software_version=_version(data[152:156]),
+        communications_firmware=_version(data[269:273]),
+        dsp_firmware=_version(data[160:162], hexadecimal=True),
+        bms_firmware=_text(data[273:281]),
+        battery_health=u16(data[64:66]) if u16(data[64:66]) <= 100 else None,
+        # The app uses unsigned bytes, unlike its signed main battery temperature.
+        # Suppress 0xFF rather than presenting an implausible 255 degrees as valid.
+        **{
+            f"internal_temperature_{index}": value if value != 0xFF else None
+            for index, value in enumerate(data[145:150], start=1)
+        },
     )
