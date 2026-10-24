@@ -47,6 +47,20 @@ The request reads main register block 13000 (300 bytes), and six expansion summa
 
 App-style total output = offset 80 + (82 + 84 + 86 + 88 + 260)/10, each term read as unsigned LE16. Nonzero USB/DC readings remain to be validated in real operating modes. Charging, cell voltage and runtime fields are deliberately omitted.
 
-All outgoing messages pass an exact allowlist before transport. No inner `82` settings query, `84` settings write, `85` output control, outer `32` configuration, or firmware command is allowed. Protocol tests check refusal even when checksums are valid.
+## Output controls
 
-The public fixture uses a fabricated identifier, a fixed test timestamp and constructed telemetry values. It contains no original phone capture or device identifier.
+A stock-app capture on October 24, 2026 confirmed on/off commands and subsequent actual-state changes for all three output groups:
+
+| Group | Register | Value |
+|---|---|---|
+| AC | 42001 | One byte, 0 off / 1 on |
+| DC | 42002 | One byte, 0 off / 1 on |
+| USB (shared group) | 42003 | One byte, 0 off / 1 on |
+
+The 63-byte request uses outer `30`, inner `85`. Body: block count `01`, register LE16, length `01 00`, boolean byte. The 64-byte acknowledgement uses **outer `33`**, inner `85`, success wrapper `03 00`, and echoes the single register/value. It is not a telemetry response (`31`). Its captured inner header bytes 4–7 are `00 01 00 0A`, with `03` at byte 12. The client validates identity, both sequences, both checksums, status, exact register and value.
+
+An acknowledgement is not sufficient proof of the physical output state. Poll block 13000 and compare offsets 92/93/94 with the requested state, allowing up to 20 seconds with two-second intervals between unsuccessful readbacks. The similarly named fields in settings block 42000 are not used as actual-state confirmation.
+
+All outgoing messages pass a narrow allowlist immediately before transport. The ordinary send path permits only handshake/telemetry; a separate control path permits one boolean write to one of the three registers above. Inner `82` settings queries, `84` bulk settings writes, other `85` registers, outer `32` configuration and firmware commands remain excluded. Protocol tests check refusal even when checksums are valid. Commands are never automatically replayed after ambiguous transport failures, and no commands are sent during setup or reconnect.
+
+The public telemetry fixture uses a fabricated identifier, a fixed timestamp and constructed values. Output request fixtures were generated offline using the app's encoder with a zero identifier. Acknowledgement fixtures preserve the observed response layout but replace the device identifier and sequences and recalculate checksums. No raw phone capture or original device identifier is included.

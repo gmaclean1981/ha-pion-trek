@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 — 2026-10-24
+
+- AC, DC and shared USB output switches with acknowledged writes and actual telemetry confirmation.
+- Existing ten sensor identities and history preserved; three new switch entities added.
+- Serialized polling and switching, bounded confirmation, and no automatic replay after failed commands.
+- Strict command/response validation based on all six stock-app actions captured on a Trek 4200.
+- Additional tests for delayed state changes, rejected/mismatched responses, ambiguous failures, cancellation, concurrent reads and Home Assistant switch services.
+
+All 125 automated tests and Ruff checks passed. Live HA tests confirmed DC and USB on/off and restored both to off. AC was left on during HA testing; its on/off packets, acknowledgements and actual state transitions were validated from the owner's stock-app capture. Existing telemetry remains live. This release also corrects diagnostics to read the installed manifest version instead of a hard-coded label.
+
 ## 0.1.1 — 2026-10-24
 
 First public release: local, read-only Bluetooth telemetry for the Pion Power Trek 4200.
