@@ -121,6 +121,26 @@
       },
       "dc_car_output_power": {
         "name": "DC car socket output power"
+      },
+      "ac_input_power": {
+        "name": "AC input power"
+      },
+      "ac_input_current": {
+        "name": "AC input current"
+      },
+      "battery_power": {
+        "name": "Battery power"
+      },
+      "battery_current": {
+        "name": "Battery current"
+      },
+      "charging_status": {
+        "name": "Charging status",
+        "state": {
+          "charging": "Charging",
+          "discharging": "Discharging",
+          "idle": "Idle"
+        }
       }
     },
     "switch": {

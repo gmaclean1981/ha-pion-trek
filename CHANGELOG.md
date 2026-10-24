@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 — 2026-10-24
+
+- Adds AC input power/current, signed battery power/current and device-reported charging status without extra BLE requests. Unsupported status codes become unknown. The battery-only trial confirmed positive battery discharge and status code 2; AC input current responded to unplug/reconnect. The follow-up 54-second 90% to 95% to 90% ceiling trial confirmed nonzero AC charging-path power, negative battery charging flow and Charging status; maximum charge was restored to 90%.
+
+- Document the owner's successful USB-A and USB-C phone-load tests. USB-C charging began after enabling USB output, with a recalled peak of approximately 41 W. Nonzero DC loads and independent measurement accuracy remain unverified.
+
+Local 0.6.0b2 was installed and verified with 42 entities, preserving all 37 existing identities. Positive battery discharge of 423-445 W / 8.0-8.4 A and code 2 were observed with AC input disconnected. Mains reconnection restored input current but did not produce a nonzero AC input power value. The final build reconnected successfully; 411 test cases pass across the full run and targeted reruns. The subsequent active-charging trial confirmed approximately 1.26-1.27 kW reported AC power, -1.18 to -1.19 kW battery power and -21.9 to -22.3 A battery current. The AC-power field appears to exclude the passthrough load and must not be treated as a total wall-power reading. Update to v0.6.0 in HACS and restart Home Assistant. Keep the existing integration entry, including when upgrading from local 0.6.0b2; no re-pairing or entity migration is needed. Runtime changes from the tested beta are limited to the manifest version.
+
 ## 0.5.0 — 2026-10-24
 
 - Adds nine read-only sensors: AC input/inverter voltage and frequency, maximum/minimum battery-cell temperature, and DC barrel/RV/car-socket power.

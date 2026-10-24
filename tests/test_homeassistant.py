@@ -133,7 +133,7 @@ async def test_entities_failure_recovery_diagnostics_and_unload(hass, transport,
         for s in states
         if s.entity_id.startswith(("sensor.trek_4200_", "binary_sensor.trek_4200_"))
     ]
-    assert len(trek) == 31
+    assert len(trek) == 36
     assert hass.states.get("sensor.trek_4200_battery").state == "89"
     assert hass.states.get("sensor.trek_4200_total_output_power").state == "381.0"
     assert hass.states.get("binary_sensor.trek_4200_ac_output_enabled").state == "on"
@@ -157,7 +157,7 @@ async def test_entities_failure_recovery_diagnostics_and_unload(hass, transport,
     await hass.async_block_till_done()
     assert hass.states.get("sensor.trek_4200_battery").state == "89"
     diagnostic = await async_get_config_entry_diagnostics(hass, entry)
-    assert diagnostic["integration_version"] == "0.5.0"
+    assert diagnostic["integration_version"] == "0.6.0"
     assert diagnostic["successful_polls"] == 2
     assert diagnostic["connections"] == 2
     assert ADDRESS not in json.dumps(diagnostic)
@@ -294,7 +294,7 @@ async def test_diagnostic_entities_and_existing_device_upgrade(
         **{f"internal_temperature_{i}": str(30 + i) for i in range(1, 6)},
     }
     entries = [e for e in entity_registry.entities.values() if e.config_entry_id == entry.entry_id]
-    assert len(entries) == 37
+    assert len(entries) == 42
     assert {e.device_id for e in entries} == {device.id}
     assert sum(e.entity_category == EntityCategory.DIAGNOSTIC for e in entries) == 18
     for key, value in expected.items():
@@ -463,4 +463,60 @@ async def test_electrical_sensors_refresh_units_categories_and_unknown(
         )
         assert hass.states.get(entity.entity_id).state == STATE_UNKNOWN
     assert hass.states.get("sensor.trek_4200_battery").state == "89"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_power_flow_refresh_metadata_and_unknown_status(hass, transport, entity_registry):
+    from .test_power_flow import READINGS
+
+    entry = entry_for(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    peripheral = transport.peripherals[-1]
+    identities = {
+        e.unique_id: (e.entity_id, e.device_id)
+        for e in entity_registry.entities.values()
+        if e.config_entry_id == entry.entry_id
+    }
+    for code, status in (
+        (1, "charging"),
+        (0, "idle"),
+        (2, "discharging"),
+        (255, STATE_UNKNOWN),
+    ):
+        peripheral.metadata_overrides = {
+            offset: struct.pack("<h", raw) for _, offset, raw, _ in READINGS
+        } | {97: bytes([code])}
+        polls_before = entry.runtime_data.client.poll_count
+        writes_before = len(peripheral.writes)
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+        assert entry.runtime_data.client.poll_count == polls_before + 1
+        assert len(peripheral.writes) == writes_before + 1
+        assert peripheral.writes[-1][52] == 0x80  # No new query or control write.
+        for key, _, _, expected in READINGS:
+            entity_id, device_id = identities[f"{FINGERPRINT}_{key}"]
+            state = hass.states.get(entity_id)
+            assert float(state.state) == expected
+            assert state.attributes["state_class"] == "measurement"
+            current = key.endswith("current")
+            assert state.attributes["device_class"] == ("current" if current else "power")
+            assert state.attributes["unit_of_measurement"] == ("A" if current else "W")
+            assert entity_registry.async_get(entity_id).entity_category is None
+            assert device_id == identities[f"{FINGERPRINT}_battery_level"][1]
+        state = hass.states.get(identities[f"{FINGERPRINT}_charging_status"][0])
+        assert state.state == status
+        assert state.attributes["device_class"] == "enum"
+        assert state.attributes["reported_code"] == code
+        assert set(state.attributes["options"]) == {"charging", "discharging", "idle"}
+        assert "unit_of_measurement" not in state.attributes
+        assert "state_class" not in state.attributes
+        assert hass.states.get("sensor.trek_4200_total_output_power").state == "381.0"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert identities == {
+        e.unique_id: (e.entity_id, e.device_id)
+        for e in entity_registry.entities.values()
+        if e.config_entry_id == entry.entry_id
+    }
     assert await hass.config_entries.async_unload(entry.entry_id)
