@@ -7,7 +7,13 @@ A community custom integration for **local Bluetooth telemetry, AC/DC/USB output
 
 **AI development disclosure:** This project was coded using Codex, an AI agent, with direction and live hardware testing by the project owner. The validation results and remaining limitations are documented below.
 
+**Version 0.6.0:** Adds AC input power/current, battery power/current and charging status using the existing telemetry response. The owner's battery-only trial confirmed positive battery discharge of 423-445 W / 8.0-8.4 A and status code 2. Reconnecting AC restored about 3.8 A input current and reduced reported battery flow to 26 W / 0.5 A. A follow-up 90% to 95% to 90% charge-limit trial confirmed Charging status, reported AC power of 1260-1274 W, and negative battery flow of -1176 to -1194 W / -21.9 to -22.3 A. The ceiling was restored to 90% after 54 seconds. The AC-power field behaves like charging-path input, not total wall consumption, and must not be used as a whole-inlet energy meter. All 37 prior entity identities are preserved, with five new sensors on the same device.
+
 **Version 0.5.0:** Adds nine read-only sensors: AC input and inverter voltage/frequency, maximum/minimum battery-cell temperature, and separate DC barrel, RV and car-socket output power. All nine fields match the stock-app decoder across 25 saved readings. Nonzero DC loads have not yet been physically validated.
+
+**Owner-reported USB-A trial, October 24, 2026:** After the v0.5.0 release, the owner connected a phone to USB-A and observed a wattage reading after enabling the USB output. This confirms a response to a real USB-A load on this Trek. The exact wattage and an independent meter comparison were not recorded.
+
+**Owner-reported USB-C trial, October 24, 2026:** With an iPhone 17 Pro Max connected and the USB output off, the phone did not charge. Enabling USB output started charging, and the owner observed a power reading peaking at approximately 41 W. This confirms the output-enable behavior and a response to a real USB-C load on this Trek. The peak is the owner's approximate recollection; no independent meter comparison or charging-protocol negotiation capture was collected. Nonzero DC port loads remain untested.
 
 **Local sensor trial, October 24, 2026:** Installed over 0.4.0 on Home Assistant 2026.10.3 and restarted HA. Both the live device entity list and saved registry confirmed all twenty-eight existing identities were preserved, with nine new sensors on the same device (thirty-seven total). Six new sensors appear under Diagnostic and three under Sensors. Observed readings included approximately 121 V / 60 Hz on AC input and inverter, battery-cell minimum/maximum of 22.3/22.5 °C, and 0.0 W for all three DC ports. The final diagnostic download confirmed 31 successful polls, six settings reads, one BlueZ connection at MTU 517, and zero invalid frames. AC remained on, DC/USB off, and maximum/minimum charge and AC power limit remained 90% / 10% / 3000 W. No output or charging-setting commands were sent during this passive trial. Nonzero DC loads and these new readings through a proxy remain untested.
 
@@ -37,6 +43,9 @@ The earlier standalone reader also completed a fresh connection and three succes
 |---|---|
 | Battery | % |
 | Battery voltage | V |
+| AC input power / current | W / A, device-reported |
+| Battery power / current | Signed W / A, device-reported |
+| Charging status | Idle / charging / discharging; raw reported_code attribute; unknown for unsupported codes |
 | Battery temperature | °C |
 | Total output power | W |
 | AC output power | W |
@@ -82,7 +91,7 @@ Every configuration change checks fresh settings, writes only the requested regi
 
 Other charging settings, main device shutdown, firmware updates and arbitrary commands are not exposed. Handshake packets include the local clock, as the app does; there is no separate clock-setting command.
 
-Total output uses the same six-output sum as the app. Basic battery/AC readings were checked against the live display. Nonzero USB/DC loads and all operating modes still need validation. Charging/input power, remaining runtime, cell voltages, expansion batteries, and energy totals are omitted because their meanings/scales or operating modes have not been sufficiently verified.
+Total output uses the same six-output sum as the app. Basic battery/AC readings were checked against the live display. The owner confirmed wattage responses with USB-A and USB-C phone loads, including approximately 41 W on USB-C; independent measurement accuracy, nonzero DC loads and other operating modes still need validation. Remaining runtime, cell voltages, expansion batteries, and energy totals are omitted because their meanings/scales or operating modes have not been sufficiently verified. Version 0.6.0 exposes device-reported AC input and battery power/current; zero readings are not proof of zero physical power. AC input power uses GridActivePwr, not the separate EV/hybrid-port ACChargerPower field, and is not estimated from volts times amps. Charging status follows the app register-parser mapping (0 idle, 1 charging, 2 discharging), with the raw code exposed as an attribute. The live battery-only trial confirmed code 2; another app screen reverses the idle/discharging labels and is not used. Hardware trials confirmed positive battery values during discharge and negative values during charging, with matching status labels. During active charging, GridActivePwr reported 1260-1274 W while battery charging absorbed 1176-1194 W and the AC load continued at about 378-379 W. Together with its zero value during mains passthrough, this suggests charging-path power rather than total wall draw; independent meter calibration remains unperformed. Status is not inferred from current or used to change the reported numeric signs.
 
 ## Requirements
 
@@ -130,6 +139,8 @@ Do not run the standalone reader and this integration simultaneously. No phone a
 Removal: delete the integration entry, then remove its files using HACS or delete its custom-component folder and restart HA. No changes to Trek firmware need undoing.
 
 ## Development
+
+Version 0.6.0 validation (hardware trial used 0.6.0b2): 411 test cases pass across the full suite and targeted reruns, including a reconstructed regression case for the owner-observed battery discharge. The final 36-test run covers the corrected status mapping, signed values, enum attributes, entity identities, failure/recovery and unchanged request counts. Ruff checks pass. Two test-only degree-symbol encoding errors in the first run were corrected before deployment. Hardware checks establish responsive AC current, positive battery discharge, negative battery charging, and matching charging/discharging labels. The subsequent 54-second raised-ceiling trial verified nonzero AC charging-path power and restoration to 90%; no new runtime code or release was needed for that check. The existing signed-value/status tests already cover these decoded values. Total wall-power interpretation and independent measurement accuracy are not claimed.
 
 Version 0.5.0 validation: 378 test cases pass across the full suite and targeted reruns after a test-only degree-symbol encoding correction. The new tests cover distinct field offsets/scales, zero versus unknown values, HA units/categories, normal refresh and failure/recovery, stable identities, and no extra telemetry requests. Ruff checks pass. An offline comparison with the extracted app decoder matched all nine new fields in 25 captured responses (225 values).
 
