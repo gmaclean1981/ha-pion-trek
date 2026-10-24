@@ -1,7 +1,8 @@
-"""Small, read-only implementation of the observed FSpower T4 protocol.
+"""Small implementation of the observed FSpower T4 protocol.
 
-Only the Trek 4200 has been hardware-tested. No control, settings or firmware
-commands are implemented. This module has no network or Home Assistant imports.
+Telemetry and single-output boolean commands were validated on a Trek 4200.
+No generic settings, charging configuration or firmware writer is provided.
+This module has no network or Home Assistant imports.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from datetime import datetime
 SERVICE_UUID = "000000ff-0000-1000-8000-00805f9b34fb"
 CHARACTERISTIC_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
 READ_BODY = bytes.fromhex("07C8322C01F43301001E34020022340200BC340100E6340200EA340200")
+OUTPUT_REGISTERS = {"ac": 42001, "dc": 42002, "usb": 42003}
 
 
 class ProtocolError(ValueError):
@@ -100,6 +102,79 @@ class ReadOnlyProtocol:
         )
         inner += struct.pack("<H", sum(inner) & 0xFFFF)
         return self._outer(0x30, b"\x03" + struct.pack("<H", len(inner)) + inner)
+
+
+class OutputControlProtocol(ReadOnlyProtocol):
+    """Encode a single requested output state; no generic settings writer."""
+
+    def set_output(self, output: str, enabled: bool) -> bytes:
+        body = output_command_body(output, enabled)
+        inner = (
+            b"\x55\xaa"
+            + struct.pack("<H", 14 + len(body))
+            + b"\x01\x01\x02\x08"
+            + self._next_sequence()
+            + b"\x02\x85"
+            + body
+        )
+        inner += struct.pack("<H", sum(inner) & 0xFFFF)
+        return self._outer(0x30, b"\x03" + struct.pack("<H", len(inner)) + inner)
+
+
+def output_command_body(output: str, enabled: bool) -> bytes:
+    """Validate the narrow public command arguments before any I/O."""
+    if type(output) is not str or output not in OUTPUT_REGISTERS:
+        raise ProtocolError("Unsupported output")
+    if type(enabled) is not bool:
+        raise ProtocolError("Output state must be a boolean")
+    return b"\x01" + struct.pack("<HHB", OUTPUT_REGISTERS[output], 1, enabled)
+
+
+def validate_output_tx(frame: bytes) -> None:
+    """Allow exactly one AC/DC/USB boolean write, independently of its encoder."""
+    validate_outer(frame)
+    if len(frame) != 63 or frame[8:10] != b"\x04\x01" or frame[35:39] != b"\x30\x03\x16\x00":
+        raise ProtocolError("Not an allowed output command")
+    inner = frame[39:-2]
+    validate_inner(inner, b"\x55\xaa")
+    if (
+        inner[4:8] != b"\x01\x01\x02\x08"
+        or inner[12:15] != b"\x02\x85\x01"
+        or u16(inner[15:17]) not in OUTPUT_REGISTERS.values()
+        or inner[17:19] != b"\x01\x00"
+        or inner[19] not in (0, 1)
+    ):
+        raise ProtocolError("Not an allowed output command")
+
+
+def validate_output_ack(
+    frame: bytes,
+    identifier: bytes,
+    outer_sequence: bytes,
+    inner_sequence: bytes,
+    output: str,
+    enabled: bool,
+) -> None:
+    """Match the captured 0x33 acknowledgement; telemetry still confirms state."""
+    expected_body = output_command_body(output, enabled)
+    validate_outer(frame)
+    if (
+        len(frame) != 64
+        or frame[8:10] != b"\x03\x01"
+        or frame[10:35] != identifier
+        or frame[4:8] != outer_sequence
+        or frame[35:40] != b"\x33\x03\x00\x16\x00"
+    ):
+        raise ProtocolError("Unexpected output acknowledgement")
+    inner = frame[40:-2]
+    validate_inner(inner, b"\xaa\x55")
+    if (
+        inner[4:8] != b"\x00\x01\x00\x0a"
+        or inner[8:12] != inner_sequence
+        or inner[12:14] != b"\x03\x85"
+        or inner[14:-2] != expected_body
+    ):
+        raise ProtocolError("Output acknowledgement does not match the requested state")
 
 
 def validate_tx(frame: bytes) -> None:

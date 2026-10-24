@@ -8,6 +8,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_ADDRESS, STATE_UNAVAILABLE
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.pion_trek.client import TrekClient
@@ -135,7 +136,9 @@ async def test_entities_failure_recovery_diagnostics_and_unload(hass, transport,
     assert hass.states.get("sensor.trek_4200_total_output_power").state == "381.0"
     assert hass.states.get("binary_sensor.trek_4200_ac_output_enabled").state == "on"
     assert hass.states.get("binary_sensor.trek_4200_dc_output_enabled").state == "off"
-    assert not any(s.entity_id.startswith("switch.") for s in states)
+    assert len([s for s in states if s.entity_id.startswith("switch.trek_4200_")]) == 3
+    assert hass.states.get("switch.trek_4200_ac_output").state == "on"
+    assert hass.states.get("switch.trek_4200_dc_output").state == "off"
     ids_before = {
         e.entity_id: e.unique_id
         for e in entity_registry.entities.values()
@@ -152,6 +155,7 @@ async def test_entities_failure_recovery_diagnostics_and_unload(hass, transport,
     await hass.async_block_till_done()
     assert hass.states.get("sensor.trek_4200_battery").state == "89"
     diagnostic = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostic["integration_version"] == "0.2.0"
     assert diagnostic["successful_polls"] == 2
     assert diagnostic["connections"] == 2
     assert ADDRESS not in json.dumps(diagnostic)
@@ -176,6 +180,52 @@ async def test_failed_initial_setup_is_retried_and_cleans_up(hass, transport):
     assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state == ConfigEntryState.SETUP_RETRY
     assert transport.peripherals[0].disconnected
+
+
+@pytest.mark.parametrize("output", ["ac", "dc", "usb"])
+async def test_output_services_confirm_state_and_preserve_other_outputs(hass, transport, output):
+    entry = entry_for(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    peripheral = transport.peripherals[-1]
+    before = dict(peripheral.output_states)
+    target = not before[output]
+    await hass.services.async_call(
+        "switch",
+        "turn_on" if target else "turn_off",
+        {"entity_id": f"switch.trek_4200_{output}_output"},
+        blocking=True,
+    )
+    assert peripheral.output_states == {**before, output: target}
+    state = "on" if target else "off"
+    assert hass.states.get(f"switch.trek_4200_{output}_output").state == state
+    assert hass.states.get(f"binary_sensor.trek_4200_{output}_output_enabled").state == state
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_failed_output_service_marks_unknown_until_poll_reconciles(hass, transport):
+    entry = entry_for(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    transport.peripherals[-1].control_mode = "reject"
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": "switch.trek_4200_dc_output"}, blocking=True
+        )
+    assert hass.states.get("switch.trek_4200_dc_output").state == STATE_UNAVAILABLE
+    await entry.runtime_data.async_refresh()
+    assert hass.states.get("switch.trek_4200_dc_output").state == "off"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_physical_state_changes_update_switches_on_poll(hass, transport):
+    entry = entry_for(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    transport.peripherals[-1].output_states["usb"] = True
+    await entry.runtime_data.async_refresh()
+    assert hass.states.get("switch.trek_4200_usb_output").state == "on"
+    assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 async def test_ha_bluetooth_lookup_routes_connection(hass, monkeypatch):

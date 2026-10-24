@@ -49,6 +49,11 @@
         "name": "USB-C output power"
       }
     },
+    "switch": {
+      "ac": { "name": "AC output" },
+      "dc": { "name": "DC output" },
+      "usb": { "name": "USB output" }
+    },
     "binary_sensor": {
       "ac_enabled": {
         "name": "AC output enabled"
@@ -59,6 +64,11 @@
       "usb_enabled": {
         "name": "USB output enabled"
       }
+    }
+  },
+  "exceptions": {
+    "output_not_confirmed": {
+      "message": "The Trek output change could not be confirmed. The command may have reached the device. Check its current state before trying again; telemetry will refresh automatically."
     }
   }
 }

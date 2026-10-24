@@ -3,9 +3,11 @@
 [![Validation](https://github.com/gmaclean1981/ha-pion-trek/actions/workflows/validate.yml/badge.svg)](https://github.com/gmaclean1981/ha-pion-trek/actions/workflows/validate.yml)
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=gmaclean1981&repository=ha-pion-trek&category=integration)
 
-A community custom integration for **local, read-only Bluetooth telemetry from the Pion Power Trek 4200**. No MQTT broker, FSpower account, cloud connection, separate bridge service or always-on PC is required during operation.
+A community custom integration for **local Bluetooth telemetry and AC/DC/USB output control for the Pion Power Trek 4200**. No MQTT broker, FSpower account, cloud connection, separate bridge service or always-on PC is required during operation.
 
-**Status: 0.1.1 prototype, tested locally on Home Assistant 2026.10.2.** One Trek 4200 produced all ten entities through both HA's local BlueZ Bluetooth adapter and a Wyze Outdoor Plug running ESPHome 2026.8.2 with active Bluetooth proxy support. Both paths negotiated MTU 517. The local-adapter trial recorded 28 consecutive successful polls on one connection, no invalid frames, and a successful integration reload/reconnect. The proxy trial verified automatic reconnection from the local adapter to the proxy, fresh telemetry, and continued proxy operation after the local adapter was restored. Other FSpower products, proxy hardware and firmware variants are unconfirmed.
+**Version 0.2.0, locally validated on Home Assistant 2026.10.2.** Adds three output switches while preserving all ten existing telemetry entities and their identities. Stock-app captures confirmed all six on/off commands, matching acknowledgements and actual output-state changes. This integration then successfully switched DC and USB on and off in live HA tests, with matching telemetry and both restored to off. AC stayed on during the HA tests: its command/response format and physical state changes were validated using the owner's stock-app capture, not another HA interruption. The earlier telemetry validation below describes the previous public release. Output switching through an ESPHome proxy has not yet been separately tested; the live switching trial used HA's local BlueZ adapter.
+
+**Earlier telemetry validation (0.1.1), on Home Assistant 2026.10.2.** One Trek 4200 produced all ten entities through both HA's local BlueZ Bluetooth adapter and a Wyze Outdoor Plug running ESPHome 2026.8.2 with active Bluetooth proxy support. Both paths negotiated MTU 517. The local-adapter trial recorded 28 consecutive successful polls on one connection, no invalid frames, and a successful integration reload/reconnect. The proxy trial verified automatic reconnection from the local adapter to the proxy, fresh telemetry, and continued proxy operation after the local adapter was restored. Other FSpower products, proxy hardware and firmware variants are unconfirmed.
 
 During the proxy observation window, diagnostics increased from 10 to 21 successful polls while the connection count remained at two (the first local session and the subsequent proxy session), with zero invalid frames. This establishes 11 additional successful polls on the same proxy connection; the full counter of 21 includes earlier local polls. These are short functional trials, not long-term reliability testing.
 
@@ -25,10 +27,17 @@ The earlier standalone reader also completed a fresh connection and three succes
 | AC output enabled | On / off status |
 | DC output enabled | On / off status |
 | USB output enabled | On / off status |
+| AC output | On / off control |
+| DC output | On / off control |
+| USB output | On / off control, shared USB group |
 
-One telemetry request updates all ten entities every 10 seconds. An unavailable device produces unavailable entities, then polling retries. A new connection verifies the device fingerprint saved during setup. Entity unique IDs remain stable across reloads and software updates.
+One telemetry request updates all thirteen entities every 10 seconds. An unavailable device produces unavailable entities, then polling retries. A new connection verifies the device fingerprint saved during setup. Entity unique IDs remain stable across reloads and software updates.
 
-The three output entities are **binary sensors**. This version cannot turn outlets on/off, change charging settings, update firmware or send arbitrary commands. BLE writes are still needed for the stock-app session handshake and telemetry requests. Handshake packets include the local clock, as the app does; there is no separate clock-setting command.
+The original three output-status binary sensors remain available for existing automations and history. The new switches set AC, DC and the shared USB output group on or off. USB-A and USB-C cannot be switched separately through these commands.
+
+Switches report the actual telemetry state. A command is sent once, its response is validated, and telemetry is polled for up to 20 seconds to confirm the requested state. Commands and regular polls share one serialized BLE connection. A failed or interrupted command is never automatically replayed; it may already have reached the device. Check the actual state before retrying. No output changes are sent during setup, startup or reconnect.
+
+Charging settings, main device shutdown, firmware updates and arbitrary commands are not exposed. Handshake packets include the local clock, as the app does; there is no separate clock-setting command.
 
 Total output uses the same six-output sum as the app. Basic battery/AC readings were checked against the live display. Nonzero USB/DC loads and all operating modes still need validation. Charging/input power, remaining runtime, cell voltages, expansion batteries, and energy totals are omitted because their meanings/scales or operating modes have not been sufficiently verified.
 
@@ -79,11 +88,11 @@ Removal: delete the integration entry, then remove its files using HACS or delet
 
 ## Development
 
-Validation on October 24, 2026: **40 tests passed** on Home Assistant 2026.10.2 / Python 3.14.9, with network sockets disabled and BLE mocked. Coverage includes the real HA setup flow and entity platforms, retry/unavailable behavior, entity IDs across reloads, connection cleanup, packet integrity, the outgoing command allowlist and BlueZ MTU acquisition (including genuinely small MTUs and acquisition failures). Ruff lint/format checks passed. The public decoder also agreed with all seven original captured telemetry replies in a private local cross-check; original captures are not shipped. The live HA trial described above followed these tests. See the validation badge for GitHub Actions results, including hassfest and HACS validation.
+Validation on October 24, 2026: **125 tests passed** on Home Assistant 2026.10.2 / Python 3.14.9, with network sockets disabled and BLE mocked. Coverage includes the real HA setup flow and entity platforms, retry/unavailable behavior, entity IDs across reloads, connection cleanup, packet integrity, the outgoing command allowlists and BlueZ MTU acquisition. Output tests additionally cover all six commands, captured acknowledgements, delayed or missing state changes, rejected/mismatched replies, ambiguous failures without replay, cancellation, serialized polling and real HA switch services. Ruff lint/format checks passed. The six encoded commands matched the stock-app capture byte-for-byte; original identifying data and raw captures are not shipped. The live HA trials described above followed these tests. See the validation badge for GitHub Actions results, including hassfest and HACS validation.
 
 `python -m pip install -r requirements-dev.txt` then `pytest` runs protocol, transport and HA integration tests. Use Linux and the Python version required by the pinned HA test harness. Tests use a fake BLE transport; they do not connect to devices or operate outputs. Run `ruff check .` and `ruff format --check .` for style checks. GitHub Actions also runs hassfest.
 
-Only original integration code and synthetic protocol fixtures belong in this repository. The extracted app, phone bugreport, Bluetooth captures, private device address/identifier, and research tools are not included.
+Only original integration code and privacy-safe protocol fixtures belong in this repository. Telemetry/request fixtures are synthetic; output acknowledgements are capture-derived with fabricated identifiers and fixed sequences. The extracted app, phone bugreport, raw Bluetooth captures, private device address/identifier, and research tools are not included.
 
 Protocol notes are in [PROTOCOL.md](PROTOCOL.md). Support is presently scoped to the tested Trek 4200. This is an independent community project, not an official Pion Power or FSpower product.
 

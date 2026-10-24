@@ -12,6 +12,7 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -60,15 +61,32 @@ class TrekCoordinator(DataUpdateCoordinator[Telemetry]):
             always_update=False,
         )
         self.client = create_client(hass, entry.data[CONF_ADDRESS], entry.data[CONF_FINGERPRINT])
+        self._operation_lock = asyncio.Lock()
 
     async def _async_update_data(self) -> Telemetry:
         try:
-            return await self.client.async_poll()
+            async with self._operation_lock:
+                return await self.client.async_poll()
         except (BleakError, TrekError, ProtocolError, OSError, TimeoutError) as err:
             # Do not put BLE addresses, raw identifiers or frames in HA logs.
             raise UpdateFailed(
                 f"Trek telemetry unavailable ({type(err).__name__}); check range and close FSpower"
             ) from err
+
+    async def async_set_output(self, output: str, enabled: bool) -> None:
+        """Publish actual readback, never an optimistic requested state."""
+        async with self._operation_lock:
+            try:
+                value = await self.client.async_set_output(output, enabled)
+            except (BleakError, TrekError, ProtocolError, OSError, TimeoutError) as err:
+                # A failed BLE transaction may still have reached the device.
+                # Mark state unavailable until the next ordinary read reconciles it.
+                self.async_set_update_error(UpdateFailed("Output state needs a fresh reading"))
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="output_not_confirmed",
+                ) from err
+            self.async_set_updated_data(value)
 
     async def async_shutdown(self) -> None:
         await super().async_shutdown()

@@ -1,4 +1,4 @@
-"""Read-only BLE session; transport is supplied by Home Assistant."""
+"""Serialized BLE telemetry and confirmed output changes via HA's transport."""
 
 from __future__ import annotations
 
@@ -14,14 +14,19 @@ from .protocol import (
     CHARACTERISTIC_UUID,
     SERVICE_UUID,
     FrameAssembler,
-    ReadOnlyProtocol,
+    OutputControlProtocol,
     Telemetry,
     decode_telemetry,
     fingerprint,
+    output_command_body,
+    validate_output_ack,
+    validate_output_tx,
     validate_tx,
 )
 
 SESSION_SETTLE_SECONDS = 1
+CONTROL_CONFIRM_SECONDS = 20
+CONTROL_POLL_SECONDS = 2
 
 
 class TrekError(Exception):
@@ -40,6 +45,10 @@ class IdentityMismatch(TrekError):
     """The device identity changed since setup."""
 
 
+class OutputNotConfirmed(TrekError):
+    """A write was acknowledged, but its requested state was not confirmed."""
+
+
 class TrekClient:
     """One persistent connection, serialized polling, clean reconnects."""
 
@@ -54,7 +63,7 @@ class TrekClient:
         self._expected_fingerprint = expected_fingerprint
         self._client: Any = None
         self._characteristic: Any = None
-        self._protocol = ReadOnlyProtocol()
+        self._protocol = OutputControlProtocol()
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=32)
         self._assembler = FrameAssembler()
         self._lock = asyncio.Lock()
@@ -91,6 +100,12 @@ class TrekClient:
         async with asyncio.timeout(12):
             await self._client.write_gatt_char(self._characteristic, frame, response=True)
 
+    async def _send_output(self, frame: bytes) -> None:
+        # This separate path cannot transmit bulk settings or arbitrary registers.
+        validate_output_tx(frame)
+        async with asyncio.timeout(12):
+            await self._client.write_gatt_char(self._characteristic, frame, response=True)
+
     async def _receive(
         self, opcode: int, sequence: bytes, inner_sequence: bytes | None = None
     ) -> bytes:
@@ -107,7 +122,7 @@ class TrekClient:
         # Old notification callbacks retain their old queue/assembler.
         queue = self._queue = asyncio.Queue(maxsize=32)
         assembler = self._assembler = FrameAssembler()
-        self._protocol = ReadOnlyProtocol()
+        self._protocol = OutputControlProtocol()
         self._client = await self._connect()
         self.connection_count += 1
         service = self._client.services.get_service(SERVICE_UUID)
@@ -151,6 +166,14 @@ class TrekClient:
         await self._send(self._protocol.platform(self._now()))
         await asyncio.sleep(SESSION_SETTLE_SECONDS)
 
+    async def _read_connected(self) -> Telemetry:
+        request = self._protocol.telemetry()
+        await self._send(request)
+        frame = await self._receive(0x31, request[4:8], request[47:51])
+        value = decode_telemetry(frame, self._protocol.identifier, request[47:51])
+        self.poll_count += 1
+        return value
+
     async def async_poll(self) -> Telemetry:
         async with self._lock:
             if self._closed:
@@ -159,12 +182,50 @@ class TrekClient:
                 async with asyncio.timeout(70):
                     if not self.connected:
                         await self._open()
-                    request = self._protocol.telemetry()
-                    await self._send(request)
-                    frame = await self._receive(0x31, request[4:8], request[47:51])
-                    value = decode_telemetry(frame, self._protocol.identifier, request[47:51])
-                    self.poll_count += 1
-                    return value
+                    return await self._read_connected()
+            except asyncio.CancelledError:
+                await self._disconnect()
+                raise
+            except Exception:
+                await self._disconnect()
+                raise
+
+    async def async_set_output(self, output: str, enabled: bool) -> Telemetry:
+        """Send once, validate acknowledgement, then confirm actual output state.
+
+        A failed or cancelled operation is never replayed on reconnect. Its
+        physical outcome may be unknown; later polls reconcile the real state.
+        """
+        output_command_body(output, enabled)
+        async with self._lock:
+            if self._closed:
+                raise TrekError("Client is closed")
+            try:
+                async with asyncio.timeout(90):
+                    if not self.connected:
+                        await self._open()
+                    request = self._protocol.set_output(output, enabled)
+                    await self._send_output(request)
+                    reply = await self._receive(0x33, request[4:8], request[47:51])
+                    validate_output_ack(
+                        reply,
+                        self._protocol.identifier,
+                        request[4:8],
+                        request[47:51],
+                        output,
+                        enabled,
+                    )
+                    try:
+                        async with asyncio.timeout(CONTROL_CONFIRM_SECONDS):
+                            while True:
+                                value = await self._read_connected()
+                                if getattr(value, f"{output}_enabled") == enabled:
+                                    return value
+                                await asyncio.sleep(CONTROL_POLL_SECONDS)
+                    except TimeoutError as err:
+                        raise OutputNotConfirmed(
+                            "Requested output state was not confirmed"
+                        ) from err
             except asyncio.CancelledError:
                 await self._disconnect()
                 raise
