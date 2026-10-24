@@ -27,7 +27,15 @@
   },
   "entity": {
     "number": {
-      "max_charge_limit": { "name": "Maximum charge" }
+      "max_charge_limit": {
+        "name": "Maximum charge"
+      },
+      "min_charge_limit": {
+        "name": "Minimum discharge"
+      },
+      "ac_charge_power_limit": {
+        "name": "AC charging power limit"
+      }
     },
     "sensor": {
       "battery_level": {
@@ -89,9 +97,15 @@
       }
     },
     "switch": {
-      "ac": { "name": "AC output" },
-      "dc": { "name": "DC output" },
-      "usb": { "name": "USB output" }
+      "ac": {
+        "name": "AC output"
+      },
+      "dc": {
+        "name": "DC output"
+      },
+      "usb": {
+        "name": "USB output"
+      }
     },
     "binary_sensor": {
       "ac_enabled": {
@@ -106,14 +120,20 @@
     }
   },
   "exceptions": {
-    "invalid_charge_limit": {
-      "message": "Enter a whole percentage above the minimum discharge limit and no higher than 100."
-    },
-    "charge_limit_not_confirmed": {
-      "message": "The maximum charge change could not be confirmed. It may have reached the Trek. Check the current setting before retrying; Home Assistant will refresh its readings automatically."
-    },
     "output_not_confirmed": {
       "message": "The Trek output change could not be confirmed. The command may have reached the device. Check its current state before trying again; telemetry will refresh automatically."
+    },
+    "invalid_max_charge_limit": {
+      "message": "Enter a whole percentage above the minimum discharge limit and no higher than 100."
+    },
+    "invalid_min_charge_limit": {
+      "message": "Enter a whole percentage from 3 to 90, below the maximum charge limit."
+    },
+    "invalid_ac_charge_power_limit": {
+      "message": "Enter 100 to 3000 watts in steps of 100."
+    },
+    "charging_setting_not_confirmed": {
+      "message": "The charging setting change could not be confirmed. It may have reached the Trek. Check the current setting before retrying; Home Assistant will refresh its readings automatically."
     }
   }
 }

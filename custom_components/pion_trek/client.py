@@ -14,10 +14,12 @@ from bleak import BleakBackend
 from .charge_protocol import (
     ChargeControlProtocol,
     ChargeSettings,
+    Setting,
     decode_settings,
-    validate_charge_ack,
-    validate_charge_limit,
+    setting_body,
     validate_charge_tx,
+    validate_setting_ack,
+    validate_setting_tx,
     validate_settings_query,
 )
 from .protocol import (
@@ -134,6 +136,11 @@ class TrekClient:
         async with asyncio.timeout(12):
             await self._client.write_gatt_char(self._characteristic, frame, response=True)
 
+    async def _send_setting(self, frame: bytes, setting: Setting) -> None:
+        validate_setting_tx(frame, setting)
+        async with asyncio.timeout(12):
+            await self._client.write_gatt_char(self._characteristic, frame, response=True)
+
     async def _receive(
         self, opcode: int, sequence: bytes, inner_sequence: bytes | None = None
     ) -> bytes:
@@ -222,6 +229,7 @@ class TrekClient:
             value,
             max_charge_limit=self._settings.max_charge_limit,
             min_charge_limit=self._settings.min_charge_limit,
+            ac_charge_power_limit=self._settings.ac_charge_power_limit,
         )
 
     async def async_poll(self) -> Telemetry:
@@ -284,12 +292,21 @@ class TrekClient:
                 raise
 
     async def async_set_charge_limit(self, limit: int) -> Telemetry:
+        return await self.async_set_setting(Setting.MAX_CHARGE, limit)
+
+    async def async_set_discharge_limit(self, limit: int) -> Telemetry:
+        return await self.async_set_setting(Setting.MIN_DISCHARGE, limit)
+
+    async def async_set_ac_charge_power(self, watts: int) -> Telemetry:
+        return await self.async_set_setting(Setting.AC_CHARGE_POWER, watts)
+
+    async def async_set_setting(self, setting: Setting, limit: int) -> Telemetry:
         """Write exactly one register once, then confirm it with fresh settings.
 
         A fresh pre-read protects the minimum discharge limit and lets us detect
         changes to other settings. Never replay a failed or ambiguous write.
         """
-        validate_charge_limit(limit)
+        setting_body(setting, limit)
         async with self._lock:
             if self._closed:
                 raise TrekError("Client is closed")
@@ -298,26 +315,40 @@ class TrekClient:
                     if not self.connected:
                         await self._open()
                     before = await self._read_settings_connected()
-                    if limit <= before.min_charge_limit:
+                    if setting == Setting.MAX_CHARGE and limit <= before.min_charge_limit:
                         raise TrekError("Maximum charge must exceed the minimum discharge limit")
+                    if setting == Setting.MIN_DISCHARGE and limit >= before.max_charge_limit:
+                        raise TrekError(
+                            "Minimum discharge must stay below the maximum charge limit"
+                        )
+                    if getattr(before, setting.value) is None:
+                        raise TrekError("The device did not report a supported charging setting")
                     telemetry_before = await self._read_connected()
-                    if limit == before.max_charge_limit:
+                    if limit == getattr(before, setting.value):
                         return await self._with_settings(telemetry_before)
-                    request = self._protocol.set_charge_limit(limit)
-                    await self._send_charge_limit(request)
+                    request = self._protocol.set_setting(setting, limit)
+                    if setting == Setting.MAX_CHARGE:
+                        await self._send_charge_limit(request)
+                    else:
+                        await self._send_setting(request, setting)
                     reply = await self._receive(0x33, request[4:8], request[47:51])
-                    validate_charge_ack(
-                        reply, self._protocol.identifier, request[4:8], request[47:51], limit
+                    validate_setting_ack(
+                        reply,
+                        self._protocol.identifier,
+                        request[4:8],
+                        request[47:51],
+                        setting,
+                        limit,
                     )
                     try:
                         async with asyncio.timeout(CONTROL_CONFIRM_SECONDS):
                             while True:
                                 after = await self._read_settings_connected()
-                                if after.other_settings() != before.other_settings():
+                                if after.other_settings(setting) != before.other_settings(setting):
                                     raise ChargeNotConfirmed(
                                         "Other device settings changed during the command"
                                     )
-                                if after.max_charge_limit == limit:
+                                if getattr(after, setting.value) == limit:
                                     telemetry_after = await self._read_connected()
                                     if any(
                                         getattr(telemetry_before, key)
@@ -330,9 +361,7 @@ class TrekClient:
                                     return await self._with_settings(telemetry_after)
                                 await asyncio.sleep(CONTROL_POLL_SECONDS)
                     except TimeoutError as err:
-                        raise ChargeNotConfirmed(
-                            "Maximum charge setting was not confirmed"
-                        ) from err
+                        raise ChargeNotConfirmed("Charging setting was not confirmed") from err
             except asyncio.CancelledError:
                 await self._disconnect()
                 raise

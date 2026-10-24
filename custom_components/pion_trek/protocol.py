@@ -263,6 +263,7 @@ class Telemetry:
     # Filled by the client from its separate settings query, not block 13000.
     max_charge_limit: int | None = None
     min_charge_limit: int | None = None
+    ac_charge_power_limit: int | None = None
 
 
 def _text(data: bytes) -> str | None:
