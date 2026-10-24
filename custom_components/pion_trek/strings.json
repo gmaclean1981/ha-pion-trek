@@ -1,0 +1,64 @@
+{
+  "title": "Pion Power Trek",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect your Trek 4200",
+        "description": "Select your Trek or enter its Bluetooth address. Close FSpower on all phones first. Only the Trek 4200 protocol has been tested. Setup will request telemetry to verify compatibility; it does not change outputs or settings.",
+        "data": {
+          "address": "Trek Bluetooth address"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Set up Trek 4200?",
+        "description": "A possible Trek was found at {address}. Continue only if this is your Pion Power Trek 4200. Close FSpower on all phones first. Setup will verify a live telemetry response. Other FSpower devices are not confirmed compatible."
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not read the Trek. Close FSpower on both phones, check Bluetooth range, and ensure an active proxy connection slot is free. Then retry.",
+      "unsupported_device": "The device did not return the tested Trek telemetry format. Only the Trek 4200 is currently supported.",
+      "invalid_address": "Enter a Bluetooth address in AA:BB:CC:DD:EE:FF format.",
+      "insufficient_mtu": "The Bluetooth connection negotiated an MTU below 89. Try another supported adapter or an active ESPHome Bluetooth proxy."
+    },
+    "abort": {
+      "already_configured": "This Trek is already configured.",
+      "not_supported": "This Bluetooth device is not a Trek candidate."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_level": {
+        "name": "Battery"
+      },
+      "battery_voltage": {
+        "name": "Battery voltage"
+      },
+      "battery_temperature": {
+        "name": "Battery temperature"
+      },
+      "output_power": {
+        "name": "Total output power"
+      },
+      "ac_output_power": {
+        "name": "AC output power"
+      },
+      "usb_a_output_power": {
+        "name": "USB-A output power"
+      },
+      "usb_c_output_power": {
+        "name": "USB-C output power"
+      }
+    },
+    "binary_sensor": {
+      "ac_enabled": {
+        "name": "AC output enabled"
+      },
+      "dc_enabled": {
+        "name": "DC output enabled"
+      },
+      "usb_enabled": {
+        "name": "USB output enabled"
+      }
+    }
+  }
+}
