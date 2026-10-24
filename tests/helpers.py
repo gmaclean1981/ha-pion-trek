@@ -71,6 +71,7 @@ class FakeBleak:
         self.metadata_overrides = {}
         self.max_charge_limit = 90
         self.min_charge_limit = 3
+        self.ac_charge_power_limit = 3000
         self.charge_mode = "normal"
         self.charge_delay_reads = 0
         self.pending_charge_limit = None
@@ -99,12 +100,20 @@ class FakeBleak:
             reply[4:8] = data[4:8]
             self._emit(rechecksum(reply))
         elif data[35] == 0x32:
-            assert data[52] == 0x84 and data[53:58] == bytes.fromhex("014ba40100")
+            assert data[52:54] == bytes([0x84, 1])
+            register, width = struct.unpack_from("<HH", data, 54)
+            key = {
+                42059: "max_charge_limit",
+                42060: "min_charge_limit",
+                45668: "ac_charge_power_limit",
+            }[register]
+            assert width == (2 if register == 45668 else 1)
+            value = int.from_bytes(data[58 : 58 + width], "little")
             if self.charge_mode not in ("reject", "no_change"):
                 if self.charge_delay_reads:
-                    self.pending_charge_limit = data[58]
+                    self.pending_charge_limit = (key, value)
                 else:
-                    self.max_charge_limit = data[58]
+                    setattr(self, key, value)
             if self.charge_mode == "other_setting":
                 self.other_setting = 99
             if self.charge_mode == "output_changed":
@@ -114,13 +123,18 @@ class FakeBleak:
             if self.charge_mode == "drop_ack":
                 return
             # Layout from the verified single-register trial, identifiers fabricated.
-            reply = bytearray.fromhex(CHARGE_FIXTURES["cases"][0]["reply_hex"])
+            template = bytes.fromhex(CHARGE_FIXTURES["cases"][0]["reply_hex"])
+            reply = bytearray(template[:54] + data[53:-4] + bytes(4))
+            struct.pack_into("<H", reply, 2, len(reply))
+            struct.pack_into("<H", reply, 38, len(reply) - 42)
+            struct.pack_into("<H", reply, 42, len(reply) - 44)
             reply[4:8], reply[48:52] = data[4:8], data[47:51]
-            reply[53:60] = bytes([0x84, 1]) + struct.pack("<HHB", 42059, 1, data[58])
             if self.charge_mode == "reject":
                 reply[37] = 1
             if self.charge_mode == "wrong_value":
                 reply[59] ^= 1
+            if self.charge_mode == "wrong_register":
+                reply[55] ^= 1
             self._emit(rechecksum(reply, inner=True))
         elif data[35] == 0x30:
             if data[52] == 0x82:
@@ -130,13 +144,14 @@ class FakeBleak:
                     if self.charge_delay_reads:
                         self.charge_delay_reads -= 1
                     else:
-                        self.max_charge_limit = self.pending_charge_limit
+                        setattr(self, *self.pending_charge_limit)
                         self.pending_charge_limit = None
                 reply = bytearray.fromhex(SETTINGS_FIXTURE["reply"])
                 reply[4:8], reply[48:52] = data[4:8], data[47:51]
                 reply[118:121] = bytes(
                     [self.max_charge_limit, self.min_charge_limit, self.other_setting]
                 )
+                struct.pack_into("<H", reply, 163, self.ac_charge_power_limit)
                 if self.stale_reply:
                     stale = bytearray(reply)
                     stale[48:52] = bytes(4)

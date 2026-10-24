@@ -156,7 +156,7 @@ async def test_entities_failure_recovery_diagnostics_and_unload(hass, transport,
     await hass.async_block_till_done()
     assert hass.states.get("sensor.trek_4200_battery").state == "89"
     diagnostic = await async_get_config_entry_diagnostics(hass, entry)
-    assert diagnostic["integration_version"] == "0.3.0"
+    assert diagnostic["integration_version"] == "0.4.0"
     assert diagnostic["successful_polls"] == 2
     assert diagnostic["connections"] == 2
     assert ADDRESS not in json.dumps(diagnostic)
@@ -293,7 +293,7 @@ async def test_diagnostic_entities_and_existing_device_upgrade(
         **{f"internal_temperature_{i}": str(30 + i) for i in range(1, 6)},
     }
     entries = [e for e in entity_registry.entities.values() if e.config_entry_id == entry.entry_id]
-    assert len(entries) == 26
+    assert len(entries) == 28
     assert {e.device_id for e in entries} == {device.id}
     assert sum(e.entity_category == EntityCategory.DIAGNOSTIC for e in entries) == 12
     for key, value in expected.items():
