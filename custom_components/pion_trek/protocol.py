@@ -260,6 +260,15 @@ class Telemetry:
     internal_temperature_3: int | None = None
     internal_temperature_4: int | None = None
     internal_temperature_5: int | None = None
+    ac_input_voltage: float | None = None
+    ac_input_frequency: float | None = None
+    inverter_voltage: float | None = None
+    inverter_frequency: float | None = None
+    battery_cell_temperature_max: float | None = None
+    battery_cell_temperature_min: float | None = None
+    dc_barrel_output_power: float | None = None
+    dc_rv_output_power: float | None = None
+    dc_car_output_power: float | None = None
     # Filled by the client from its separate settings query, not block 13000.
     max_charge_limit: int | None = None
     min_charge_limit: int | None = None
@@ -281,6 +290,12 @@ def _version(data: bytes, *, hexadecimal: bool = False) -> str | None:
     if data in (bytes(len(data)), b"\xff" * len(data)):
         return None
     return ".".join(f"{byte:02x}" if hexadecimal else str(byte) for byte in data)
+
+
+def _optional_tenths(data: bytes, offset: int) -> float | None:
+    """Decode app-style unsigned tenths; conservatively suppress all-FF words."""
+    value = u16(data[offset : offset + 2])
+    return None if value == 0xFFFF else value / 10
 
 
 def decode_telemetry(frame: bytes, identifier: bytes, inner_sequence: bytes) -> Telemetry:
@@ -326,6 +341,15 @@ def decode_telemetry(frame: bytes, identifier: bytes, inner_sequence: bytes) -> 
         ac_output_power=ac,
         usb_a_output_power=usb_a,
         usb_c_output_power=usb_c,
+        ac_input_voltage=_optional_tenths(data, 28),
+        ac_input_frequency=_optional_tenths(data, 32),
+        inverter_voltage=_optional_tenths(data, 42),
+        inverter_frequency=_optional_tenths(data, 46),
+        battery_cell_temperature_max=_optional_tenths(data, 76),
+        battery_cell_temperature_min=_optional_tenths(data, 78),
+        dc_barrel_output_power=_optional_tenths(data, 86),
+        dc_rv_output_power=_optional_tenths(data, 88),
+        dc_car_output_power=_optional_tenths(data, 260),
         ac_enabled=bool(data[92]),
         dc_enabled=bool(data[93]),
         usb_enabled=bool(data[94]),

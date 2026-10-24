@@ -9,7 +9,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfPower, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfElectricPotential,
+    UnitOfFrequency,
+    UnitOfPower,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -20,6 +26,44 @@ from .entity import TrekEntity
 PARALLEL_UPDATES = 0
 
 SENSORS = (
+    *(
+        SensorEntityDescription(
+            key=key,
+            translation_key=key,
+            device_class=device_class,
+            native_unit_of_measurement=unit,
+            state_class=SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            suggested_display_precision=1,
+        )
+        for key, device_class, unit in (
+            ("ac_input_voltage", SensorDeviceClass.VOLTAGE, UnitOfElectricPotential.VOLT),
+            ("inverter_voltage", SensorDeviceClass.VOLTAGE, UnitOfElectricPotential.VOLT),
+            ("ac_input_frequency", SensorDeviceClass.FREQUENCY, UnitOfFrequency.HERTZ),
+            ("inverter_frequency", SensorDeviceClass.FREQUENCY, UnitOfFrequency.HERTZ),
+            (
+                "battery_cell_temperature_max",
+                SensorDeviceClass.TEMPERATURE,
+                UnitOfTemperature.CELSIUS,
+            ),
+            (
+                "battery_cell_temperature_min",
+                SensorDeviceClass.TEMPERATURE,
+                UnitOfTemperature.CELSIUS,
+            ),
+        )
+    ),
+    *(
+        SensorEntityDescription(
+            key=key,
+            translation_key=key,
+            device_class=SensorDeviceClass.POWER,
+            native_unit_of_measurement=UnitOfPower.WATT,
+            state_class=SensorStateClass.MEASUREMENT,
+            suggested_display_precision=1,
+        )
+        for key in ("dc_barrel_output_power", "dc_rv_output_power", "dc_car_output_power")
+    ),
     SensorEntityDescription(
         key="battery_level",
         translation_key="battery_level",
