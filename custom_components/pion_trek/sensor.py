@@ -1,4 +1,4 @@
-"""Verified telemetry sensors."""
+"""Local device-reported telemetry sensors."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfFrequency,
     UnitOfPower,
@@ -26,6 +27,29 @@ from .entity import TrekEntity
 PARALLEL_UPDATES = 0
 
 SENSORS = (
+    *(
+        SensorEntityDescription(
+            key=key,
+            translation_key=key,
+            device_class=device_class,
+            native_unit_of_measurement=unit,
+            state_class=SensorStateClass.MEASUREMENT,
+            suggested_display_precision=precision,
+        )
+        for key, device_class, unit, precision in (
+            ("ac_input_power", SensorDeviceClass.POWER, UnitOfPower.WATT, 0),
+            ("battery_power", SensorDeviceClass.POWER, UnitOfPower.WATT, 0),
+            ("ac_input_current", SensorDeviceClass.CURRENT, UnitOfElectricCurrent.AMPERE, 1),
+            ("battery_current", SensorDeviceClass.CURRENT, UnitOfElectricCurrent.AMPERE, 1),
+        )
+    ),
+    SensorEntityDescription(
+        key="charging_status",
+        translation_key="charging_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=["charging", "discharging", "idle"],
+        icon="mdi:battery-sync-outline",
+    ),
     *(
         SensorEntityDescription(
             key=key,
@@ -171,3 +195,9 @@ class TrekSensor(TrekEntity, SensorEntity):
     @property
     def native_value(self) -> int | float | str | None:
         return getattr(self.coordinator.data, self.entity_description.key)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int | None] | None:
+        if self.entity_description.key == "charging_status":
+            return {"reported_code": self.coordinator.data.charging_status_code}
+        return None

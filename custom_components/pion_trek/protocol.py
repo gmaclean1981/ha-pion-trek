@@ -16,6 +16,10 @@ SERVICE_UUID = "000000ff-0000-1000-8000-00805f9b34fb"
 CHARACTERISTIC_UUID = "0000ff01-0000-1000-8000-00805f9b34fb"
 READ_BODY = bytes.fromhex("07C8322C01F43301001E34020022340200BC340100E6340200EA340200")
 OUTPUT_REGISTERS = {"ac": 42001, "dc": 42002, "usb": 42003}
+# Use the app's main-unit register parser mapping. Its BLE detail screen swaps
+# idle/discharging, but the owner's battery-only trial confirmed code 2 with
+# positive 435-445 W / 8.2-8.4 A battery discharge. Keep the raw code available.
+CHARGING_STATES = {0: "idle", 1: "charging", 2: "discharging"}
 
 
 class ProtocolError(ValueError):
@@ -269,6 +273,12 @@ class Telemetry:
     dc_barrel_output_power: float | None = None
     dc_rv_output_power: float | None = None
     dc_car_output_power: float | None = None
+    ac_input_power: int | None = None
+    ac_input_current: float | None = None
+    battery_power: int | None = None
+    battery_current: float | None = None
+    charging_status: str | None = None
+    charging_status_code: int | None = None
     # Filled by the client from its separate settings query, not block 13000.
     max_charge_limit: int | None = None
     min_charge_limit: int | None = None
@@ -350,6 +360,14 @@ def decode_telemetry(frame: bytes, identifier: bytes, inner_sequence: bytes) -> 
         dc_barrel_output_power=_optional_tenths(data, 86),
         dc_rv_output_power=_optional_tenths(data, 88),
         dc_car_output_power=_optional_tenths(data, 260),
+        # Match the app's signed LE16 decoding, including negative values.
+        # All-FF is -1 here, not the unsigned-field unknown marker.
+        ac_input_power=int.from_bytes(data[34:36], "little", signed=True),
+        ac_input_current=int.from_bytes(data[30:32], "little", signed=True) / 10,
+        battery_power=int.from_bytes(data[58:60], "little", signed=True),
+        battery_current=int.from_bytes(data[56:58], "little", signed=True) / 10,
+        charging_status=CHARGING_STATES.get(data[97]),
+        charging_status_code=data[97],
         ac_enabled=bool(data[92]),
         dc_enabled=bool(data[93]),
         usb_enabled=bool(data[94]),
