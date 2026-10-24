@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — 2026-10-24
+
+- Minimum discharge configuration number, with fresh maximum-charge checks and preservation of the observed 3% factory reserve.
+- AC charging power limit configuration number, 100–3000 W in 100 W steps. The separate EV/hybrid-port limit is untouched; zero-watt writes are excluded.
+- Intent-bound single-register commands, acknowledgements, fresh readback and comparison of every other queried setting and output state. Startup and reconnect send no setting writes.
+- All twenty-six existing entities retained, with two additional configuration entities.
+
+All 358 test cases passed across the development suite and targeted additions, with Ruff checks passing. Independent BLE tests confirmed a 10% reserve and a 3000 W → 1000 W → 3000 W AC-limit trial, including readback after reconnect. Home Assistant UI tests confirmed 10% → 15% → 10% and 3000 W → 1500 W → 3000 W. Maximum charge remained 90%, other queried settings stayed unchanged, and AC stayed on with DC/USB off. All twenty-six prior entity identities were verified in the installed registry. The new exchanges have sanitized regression fixtures.
+
+Actual charging speed under load, discharge cutoff, power-cycle retention and proxy writes remain untested. No new stock-app change capture was collected; the independent client verified the mapped registers directly.
+
+Update through HACS and restart Home Assistant. Keep the existing integration entry, including when upgrading from the local 0.4.0b1 build. The new numbers appear under Configuration; no re-pairing or entity migration is required.
+
 ## 0.3.0 — 2026-10-24
 
 - Twelve diagnostic entities: serial number, hardware version, communications/DSP/BMS firmware, an additional reported software version, battery health, and five internal temperatures. Serial, hardware and communications firmware also populate HA's device information.
