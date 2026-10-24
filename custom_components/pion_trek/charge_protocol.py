@@ -1,15 +1,40 @@
-"""Fixed settings query and a write restricted to the maximum-charge register."""
+"""Fixed settings query and intent-checked, single-register charge controls."""
 
 from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from .protocol import OutputControlProtocol, ProtocolError, u16, validate_inner, validate_outer
 
 SETTINGS_BODY = bytes.fromhex("0710A4640064B202006AB202006EB2010069B2010070B2010066B20200")
 SETTINGS_BLOCKS = {42000: 100, 45668: 2, 45674: 2, 45678: 1, 45673: 1, 45680: 1, 45670: 2}
 MAX_CHARGE_REGISTER = 42059
+
+
+class Setting(StrEnum):
+    MAX_CHARGE = "max_charge_limit"
+    MIN_DISCHARGE = "min_charge_limit"
+    AC_CHARGE_POWER = "ac_charge_power_limit"
+
+
+# Register, width, minimum, maximum, step. Zero-watt semantics are not validated.
+# A 3% reserve is present on the owner's device, below the app editor's 10% floor.
+SETTING_SPECS = {
+    Setting.MAX_CHARGE: (42059, 1, 0, 100, 1),
+    Setting.MIN_DISCHARGE: (42060, 1, 3, 90, 1),
+    Setting.AC_CHARGE_POWER: (45668, 2, 100, 3000, 100),
+}
+
+
+def setting_body(setting: Setting, value: int) -> bytes:
+    if not isinstance(setting, Setting):
+        raise ProtocolError("Unsupported charging setting")
+    address, width, minimum, maximum, step = SETTING_SPECS[setting]
+    if type(value) is not int or not minimum <= value <= maximum or value % step:
+        raise ProtocolError("Charging setting is outside the supported range or step")
+    return b"\x01" + struct.pack("<HH", address, width) + value.to_bytes(width, "little")
 
 
 def validate_charge_limit(value: int) -> None:
@@ -42,6 +67,10 @@ class ChargeControlProtocol(OutputControlProtocol):
         # Validate before advancing sequence or preparing a packet.
         return self._charge_frame(0x32, 0x84, charge_body(value))
 
+    def set_setting(self, setting: Setting, value: int) -> bytes:
+        body = setting_body(setting, value)
+        return self._charge_frame(0x32, 0x84, body)
+
 
 def _validate_request(frame: bytes, opcode: int, command: int, body: bytes) -> None:
     validate_outer(frame)
@@ -66,6 +95,16 @@ def validate_charge_tx(frame: bytes) -> None:
     if len(frame) != 63:
         raise ProtocolError("Not a single charge-limit write")
     _validate_request(frame, 0x32, 0x84, charge_body(frame[58]))
+
+
+def validate_setting_tx(frame: bytes, setting: Setting) -> None:
+    if not isinstance(setting, Setting):
+        raise ProtocolError("Unsupported charging setting")
+    width = SETTING_SPECS[setting][1]
+    if len(frame) != 62 + width:
+        raise ProtocolError("Not a single charging-setting write")
+    value = int.from_bytes(frame[58 : 58 + width], "little")
+    _validate_request(frame, 0x32, 0x84, setting_body(setting, value))
 
 
 def _response_body(
@@ -97,13 +136,20 @@ class ChargeSettings:
     blocks: tuple[tuple[int, bytes], ...] = field(repr=False)
     max_charge_limit: int
     min_charge_limit: int
+    ac_charge_power_limit: int | None
 
-    def other_settings(self) -> tuple[tuple[int, bytes], ...]:
-        """Compare readback without the one byte we intentionally changed."""
-        return tuple(
-            (address, data[:59] + b"\0" + data[60:] if address == 42000 else data)
-            for address, data in self.blocks
-        )
+    def other_settings(
+        self, setting: Setting = Setting.MAX_CHARGE
+    ) -> tuple[tuple[int, bytes], ...]:
+        """Ignore only the selected setting; retain every other queried byte."""
+        target, width, *_ = SETTING_SPECS[setting]
+        result = []
+        for address, data in self.blocks:
+            offset = target - address
+            if 0 <= offset and offset + width <= len(data):
+                data = data[:offset] + bytes(width) + data[offset + width :]
+            result.append((address, data))
+        return tuple(result)
 
 
 def decode_settings(
@@ -128,7 +174,10 @@ def decode_settings(
     maximum, minimum = blocks[42000][59:61]
     if maximum > 100 or minimum > 100:
         raise ProtocolError("Invalid charge-limit percentage")
-    return ChargeSettings(tuple(sorted(blocks.items())), maximum, minimum)
+    ac_power = int.from_bytes(blocks[45668], "little")
+    return ChargeSettings(
+        tuple(sorted(blocks.items())), maximum, minimum, ac_power if ac_power <= 3000 else None
+    )
 
 
 def validate_charge_ack(
@@ -137,3 +186,16 @@ def validate_charge_ack(
     body = _response_body(frame, identifier, outer_sequence, inner_sequence, 0x84)
     if body != charge_body(value):
         raise ProtocolError("Charge-limit acknowledgement does not match the request")
+
+
+def validate_setting_ack(
+    frame: bytes,
+    identifier: bytes,
+    outer_sequence: bytes,
+    inner_sequence: bytes,
+    setting: Setting,
+    value: int,
+) -> None:
+    body = _response_body(frame, identifier, outer_sequence, inner_sequence, 0x84)
+    if body != setting_body(setting, value):
+        raise ProtocolError("Charging-setting acknowledgement does not match the request")

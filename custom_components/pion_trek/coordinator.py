@@ -17,6 +17,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .charge_protocol import Setting
 from .client import TrekClient, TrekError
 from .const import CONF_FINGERPRINT, DOMAIN, NAME, POLL_INTERVAL
 from .protocol import ProtocolError, Telemetry
@@ -123,14 +124,17 @@ class TrekCoordinator(DataUpdateCoordinator[Telemetry]):
         await self.client.async_close()
 
     async def async_set_charge_limit(self, limit: int) -> None:
+        await self.async_set_setting(Setting.MAX_CHARGE, limit)
+
+    async def async_set_setting(self, setting: Setting, value: int) -> None:
         async with self._operation_lock:
             try:
-                value = await self.client.async_set_charge_limit(limit)
+                reading = await self.client.async_set_setting(setting, value)
             except (BleakError, TrekError, ProtocolError, OSError, TimeoutError) as err:
-                self.async_set_update_error(UpdateFailed("Charge limit needs a fresh reading"))
+                self.async_set_update_error(UpdateFailed("Charging setting needs a fresh reading"))
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
-                    translation_key="charge_limit_not_confirmed",
+                    translation_key="charging_setting_not_confirmed",
                 ) from err
-            self._update_device_metadata(value)
-            self.async_set_updated_data(value)
+            self._update_device_metadata(reading)
+            self.async_set_updated_data(reading)
