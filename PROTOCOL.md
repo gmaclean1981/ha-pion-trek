@@ -37,15 +37,35 @@ The request reads main register block 13000 (300 bytes), and six expansion summa
 
 | Offset | Format | Reading |
 |---|---|---|
+| 1–25 | ASCII, matching outer identifier | Serial number |
 | 54 | unsigned LE16 ÷10 | Battery V |
 | 60 | signed LE16 | Battery °C |
 | 62 | unsigned LE16 | Battery % |
+| 64 | unsigned LE16 | Battery health %, device estimate |
 | 80 | unsigned LE16 | AC output W |
 | 82 | unsigned LE16 ÷10 | USB-A W |
 | 84 | unsigned LE16 ÷10 | USB-C W |
 | 92 / 93 / 94 | byte, 0 or 1 | AC / DC / USB enabled |
+| 145–149 | Five unsigned bytes | Internal temperatures 1–5, °C |
+| 152–155 | Four decimal bytes, dot-separated | Reported software version; component not established |
+| 156–159 | Four decimal bytes, dot-separated | Hardware version |
+| 160–161 | Two **hexadecimal** bytes, dot-separated | DSP firmware |
+| 269–272 | Four decimal bytes, dot-separated | Communications firmware (app's DebugSoftVer / Mater_Com) |
+| 273–280 | NUL-padded ASCII | BMS firmware |
 
 App-style total output = offset 80 + (82 + 84 + 86 + 88 + 260)/10, each term read as unsigned LE16. Nonzero USB/DC readings remain to be validated in real operating modes. Charging, cell voltage and runtime fields are deliberately omitted.
+
+Metadata offsets and formatting were compared with the app parser and 25 captured telemetry responses from two sessions. All five temperature locations remain unidentified. Versions consisting entirely of zero or FF bytes, invalid/nonmatching serial text, invalid BMS text, battery health above 100, and temperature FF bytes are treated as unknown. Suppressing FF temperatures is a conservative validity rule, not a confirmed vendor sentinel definition. Zero degrees and zero-percent health remain representable. Metadata never changes entity identity or the permitted outgoing commands.
+
+## Maximum battery charge
+
+Settings read: outer `30`, inner `82`. The fixed query requests 42000/100, 45668/2, 45674/2, 45678/1, 45673/1, 45680/1 and 45670/2. Reply: outer `33`, inner `82`. Both sequences, identity, checksums, status and exact block sizes are checked before accepting settings.
+
+Main block 42000 has one-byte maximum state of charge at offset 59 (register **42059**, LE bytes `4B A4`), minimum discharge state of charge at offset 60, and maximum charging-current percentage at offset 61. They are distinct settings. An earlier captured reply reported 90%, 3% and 100% respectively.
+
+The stock app uses outer `32`, inner `84` for a bulk write of eighteen settings. The integration instead permits exactly one register: body `01 4B A4 01 00 <percentage>`. The number accepts whole percentages above the freshly read minimum discharge limit and at most 100. It never writes that minimum, charging-current percentage, other settings or output switches through this path. On October 24, 2026, the single-register request was accepted twice (85%, then 90%) and each result was independently read back. Its 64-byte acknowledgement uses outer `33`, inner `84`, status `00`, and echoes the one-register body. Both sequences, identity, checksums, header and exact register/value are validated. The client then reconnected and read 90% again. The stock-app capture independently showed both transitions and matching bulk acknowledgements, with only byte 59 changing in the queried settings. No output commands were sent in this trial.
+
+Each charge change is serialized with all other BLE operations: fresh settings read, actual output-state baseline, one write, acknowledgement validation, fresh settings readback and output-state check. All other queried settings bytes must match the baseline before success is reported. A request for the current value performs no write. Failures disconnect and are never replayed; subsequent reads reconcile the device's actual setting. Normal settings refresh is approximately 60 seconds and on every new connection. Startup/reconnect never restores or reapplies a saved charge value.
 
 ## Output controls
 
@@ -61,6 +81,6 @@ The 63-byte request uses outer `30`, inner `85`. Body: block count `01`, registe
 
 An acknowledgement is not sufficient proof of the physical output state. Poll block 13000 and compare offsets 92/93/94 with the requested state, allowing up to 20 seconds with two-second intervals between unsuccessful readbacks. The similarly named fields in settings block 42000 are not used as actual-state confirmation.
 
-All outgoing messages pass a narrow allowlist immediately before transport. The ordinary send path permits only handshake/telemetry; a separate control path permits one boolean write to one of the three registers above. Inner `82` settings queries, `84` bulk settings writes, other `85` registers, outer `32` configuration and firmware commands remain excluded. Protocol tests check refusal even when checksums are valid. Commands are never automatically replayed after ambiguous transport failures, and no commands are sent during setup or reconnect.
+All outgoing messages pass a narrow allowlist immediately before transport. The ordinary send path permits only handshake/telemetry; a separate control path permits one boolean write to one of the three registers above. Separate paths allow only the fixed inner `82` settings query and a single outer `32` / inner `84` write to maximum-charge register 42059. Bulk settings writes, other `84`/`85` registers, firmware commands and arbitrary configuration remain excluded. Protocol tests check refusal even when checksums are valid. Commands are never automatically replayed after ambiguous transport failures, and no output or charge-setting writes are sent during setup or reconnect.
 
-The public telemetry fixture uses a fabricated identifier, a fixed timestamp and constructed values. Output request fixtures were generated offline using the app's encoder with a zero identifier. Acknowledgement fixtures preserve the observed response layout but replace the device identifier and sequences and recalculate checksums. No raw phone capture or original device identifier is included.
+The public telemetry fixture uses a fabricated identifier, a fixed timestamp and constructed values. Output request fixtures were generated offline using the app's encoder with a zero identifier. Acknowledgement fixtures preserve the observed response layout but replace the device identifier and sequences and recalculate checksums. The live single-register charge requests and acknowledgements are similarly sanitized. Settings-read fixtures contain constructed values rather than the private settings block. No raw phone capture or original device identifier is included.

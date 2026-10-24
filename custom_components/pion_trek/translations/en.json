@@ -26,6 +26,9 @@
     }
   },
   "entity": {
+    "number": {
+      "max_charge_limit": { "name": "Maximum charge" }
+    },
     "sensor": {
       "battery_level": {
         "name": "Battery"
@@ -47,6 +50,42 @@
       },
       "usb_c_output_power": {
         "name": "USB-C output power"
+      },
+      "serial_number": {
+        "name": "Serial number"
+      },
+      "hardware_version": {
+        "name": "Hardware version"
+      },
+      "communications_firmware": {
+        "name": "Communications firmware"
+      },
+      "dsp_firmware": {
+        "name": "DSP firmware"
+      },
+      "bms_firmware": {
+        "name": "BMS firmware"
+      },
+      "reported_software_version": {
+        "name": "Reported software version"
+      },
+      "battery_health": {
+        "name": "Battery health"
+      },
+      "internal_temperature_1": {
+        "name": "Internal temperature 1"
+      },
+      "internal_temperature_2": {
+        "name": "Internal temperature 2"
+      },
+      "internal_temperature_3": {
+        "name": "Internal temperature 3"
+      },
+      "internal_temperature_4": {
+        "name": "Internal temperature 4"
+      },
+      "internal_temperature_5": {
+        "name": "Internal temperature 5"
       }
     },
     "switch": {
@@ -67,6 +106,12 @@
     }
   },
   "exceptions": {
+    "invalid_charge_limit": {
+      "message": "Enter a whole percentage above the minimum discharge limit and no higher than 100."
+    },
+    "charge_limit_not_confirmed": {
+      "message": "The maximum charge change could not be confirmed. It may have reached the Trek. Check the current setting before retrying; Home Assistant will refresh its readings automatically."
+    },
     "output_not_confirmed": {
       "message": "The Trek output change could not be confirmed. The command may have reached the device. Check its current state before trying again; telemetry will refresh automatically."
     }

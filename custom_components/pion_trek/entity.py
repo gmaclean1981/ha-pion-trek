@@ -24,4 +24,5 @@ class TrekEntity(CoordinatorEntity[TrekCoordinator]):
             name=MODEL,
             manufacturer="Pion Power",
             model=MODEL,
+            **coordinator.device_metadata(coordinator.data),
         )

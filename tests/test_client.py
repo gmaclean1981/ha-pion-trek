@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from bleak import BleakBackend, BleakError
 
+from custom_components.pion_trek.charge_protocol import validate_settings_query
 from custom_components.pion_trek.client import (
     IdentityMismatch,
     TrekClient,
@@ -27,9 +28,12 @@ async def test_persistent_connection_and_stale_reply():
     assert client.poll_count == 2
     assert client.device_fingerprint == FINGERPRINT
     assert connect.await_count == 1
-    assert [f[35] for f in ble.writes] == [4, 2, 0x30, 0x30]
+    assert [f[35] for f in ble.writes] == [4, 2, 0x30, 0x30, 0x30]
     for frame in ble.writes:
-        validate_tx(frame)
+        if frame[35] == 0x30 and frame[52] == 0x82:
+            validate_settings_query(frame)
+        else:
+            validate_tx(frame)
     await client.async_close()
     assert ble.disconnected
     with pytest.raises(TrekError, match="closed"):

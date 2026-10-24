@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 
 from .coordinator import TrekCoordinator
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry[TrekCoordinator]) -> bool:

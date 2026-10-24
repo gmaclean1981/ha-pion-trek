@@ -24,6 +24,7 @@ async def async_get_config_entry_diagnostics(
         "negotiated_mtu": client.mtu,
         "bluetooth_backend": client.backend,
         "successful_polls": client.poll_count,
+        "successful_settings_reads": client.settings_poll_count,
         "connections": client.connection_count,
         "invalid_frames_current_session": client.invalid_frames,
     }

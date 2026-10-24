@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -61,12 +62,40 @@ class TrekCoordinator(DataUpdateCoordinator[Telemetry]):
             always_update=False,
         )
         self.client = create_client(hass, entry.data[CONF_ADDRESS], entry.data[CONF_FINGERPRINT])
+        self._identity = entry.data[CONF_FINGERPRINT]
+        self._entry_id = entry.entry_id
         self._operation_lock = asyncio.Lock()
+
+    @staticmethod
+    def device_metadata(data: Telemetry) -> dr.DeviceInfo:
+        """Only known metadata; never erase a previously learned version with None."""
+        metadata = dr.DeviceInfo()
+        if data.serial_number is not None:
+            metadata["serial_number"] = data.serial_number
+        if data.hardware_version is not None:
+            metadata["hw_version"] = data.hardware_version
+        if data.communications_firmware is not None:
+            metadata["sw_version"] = data.communications_firmware
+        return metadata
+
+    def _update_device_metadata(self, data: Telemetry) -> None:
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device_by_identifier((DOMAIN, self._identity), self._entry_id)
+        if device is not None:
+            changes = {
+                key: value
+                for key, value in self.device_metadata(data).items()
+                if getattr(device, key) != value
+            }
+            if changes:
+                registry.async_update_device(device.id, **changes)
 
     async def _async_update_data(self) -> Telemetry:
         try:
             async with self._operation_lock:
-                return await self.client.async_poll()
+                value = await self.client.async_poll()
+                self._update_device_metadata(value)
+                return value
         except (BleakError, TrekError, ProtocolError, OSError, TimeoutError) as err:
             # Do not put BLE addresses, raw identifiers or frames in HA logs.
             raise UpdateFailed(
@@ -86,8 +115,22 @@ class TrekCoordinator(DataUpdateCoordinator[Telemetry]):
                     translation_domain=DOMAIN,
                     translation_key="output_not_confirmed",
                 ) from err
+            self._update_device_metadata(value)
             self.async_set_updated_data(value)
 
     async def async_shutdown(self) -> None:
         await super().async_shutdown()
         await self.client.async_close()
+
+    async def async_set_charge_limit(self, limit: int) -> None:
+        async with self._operation_lock:
+            try:
+                value = await self.client.async_set_charge_limit(limit)
+            except (BleakError, TrekError, ProtocolError, OSError, TimeoutError) as err:
+                self.async_set_update_error(UpdateFailed("Charge limit needs a fresh reading"))
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="charge_limit_not_confirmed",
+                ) from err
+            self._update_device_metadata(value)
+            self.async_set_updated_data(value)
