@@ -114,7 +114,7 @@ async def test_poll_does_not_interleave_with_output_change():
     release.set()
     assert (await change).usb_enabled
     assert (await poll).usb_enabled
-    assert [f[52] for f in ble.writes if f[35] == 0x30] == [0x85, 0x80, 0x80]
+    assert [f[52] for f in ble.writes if f[35] == 0x30] == [0x85, 0x80, 0x82, 0x80]
     await client.async_close()
 
 
